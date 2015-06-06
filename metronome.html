@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <script src="/metronome/metronome.js"></script>
+    <script>
+      metronome = new Metronome();
+      started = false;
+      function toggle() {
+        if (started) {
+          metronome.stop();
+        } else {
+          metronome.start();
+        }
+        started = !started;
+      }
+      
+      function setbpmvalue() {
+        document.getElementById("bpm").value = document.getElementById("bpmslider").value;
+        setbpm();
+      }
+      
+      function setbpm() {
+        metronome.bpm = +document.getElementById("bpm").value;
+      }
+    </script>
+    <div id="controls">
+      <input id="bpmslider" type="range" min="10" max="200" value="60" oninput="setbpmvalue()">
+      <input id="bpm" type="number" min="10" max="200" value="60" oninput="setbpm()"><br>
+      <button id="togglestart" type="button" onclick="toggle()">Start/Stop</button>
+    </div>
+  </body>
+</html>
