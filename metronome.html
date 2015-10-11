@@ -14,19 +14,47 @@
         started = !started;
       }
       
-      function setbpmvalue() {
-        document.getElementById("bpm").value = document.getElementById("bpmslider").value;
-        setbpm();
+      function onsliderchange() {
+        setbpm(+document.getElementById("bpmslider").value);
+      }
+
+      function onbpmchange() {
+        metronome.bpm = getbpm();
       }
       
-      function setbpm() {
-        metronome.bpm = +document.getElementById("bpm").value;
+      function getbpm() {
+        return +document.getElementById("bpm").value;
+      }
+      
+      function setbpm(bpm) {
+        bpm = Math.round(bpm);
+        bpm = Math.min(Math.max(bpm, 10), 200);
+        document.getElementById("bpm").value = bpm;
+        onbpmchange();
+      }
+      
+      function add(n) {
+        setbpm(getbpm() + n);
+      }
+      
+      function mul(n) {
+        setbpm(getbpm() * n);
       }
     </script>
     <div id="controls">
       <input id="bpmslider" type="range" min="10" max="200" value="60" oninput="setbpmvalue()">
       <input id="bpm" type="number" min="10" max="200" value="60" oninput="setbpm()"><br>
-      <button id="togglestart" type="button" onclick="toggle()">Start/Stop</button>
+      <button onclick="toggle()">Start/Stop</button><br>
+      <button onclick="add(-10)">-10</button>
+      <button onclick="add(-5)">-5</button>
+      <button onclick="add(5)">5</button>
+      <button onclick="add(10)">10</button><br>
+      <button onclick="mul(1/2)">/2</button>
+      <button onclick="mul(1/1.1)">-10%</button>
+      <button onclick="mul(1/1.05)">-5%</button>
+      <button onclick="mul(1.05)">5%</button>
+      <button onclick="mul(1.1)">10%</button>
+      <button onclick="mul(2)">x2</button>
     </div>
   </body>
 </html>
