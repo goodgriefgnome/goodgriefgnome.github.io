@@ -12,9 +12,10 @@ self.addEventListener('activate', function(event) {
 self.addEventListener('fetch', function(event) {
   event.respondWith(
     caches.open('all').then(function(cache) {
-      fetch(event.request).then(function(response) {
+      return fetch(event.request).then(function(response) {
         if (response.ok) {
           cache.put(event.request, response.clone());
+          return response;
         }
         return cache.match(event.request).then(function(cresponse) {
           return cresponse || response;
