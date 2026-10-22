@@ -114,8 +114,8 @@ pre.log { margin: 0; font: 12px/1.45 var(--font-mono); background: var(--bg); bo
     <ol class="plan">
       <li>Run steps 2 to 5 in a Chrome tab first, then install the app (Chrome menu, then <b>Add to home screen</b> or <b>Install app</b>) and repeat them from the home-screen icon.</li>
       <li>In <b>Score folder</b>, tap <b>Pick folder</b> and choose a folder with PDFs. Open one, try one and two pages per screen, and draw on it with the stylus and with your palm resting on the screen.</li>
-      <li>In <b>Library</b>, import a score or two.</li>
-      <li>Close the app completely (swipe it away in recent apps), then reopen it. In <b>Score folder</b>, tap <b>Reconnect</b> and note whether you got a one-tap prompt, the full file picker, or nothing.</li>
+      <li>In <b>Recent files</b>, open two or three PDFs, including one from the Download folder. In <b>Library</b>, import a score or two.</li>
+      <li>Close the app completely (swipe it away in recent apps), then reopen it. In <b>Score folder</b>, tap <b>Reconnect</b> and note whether you got a one-tap prompt, the full file picker, or nothing. Do the same with a file in <b>Recent files</b>.</li>
       <li>Turn on airplane mode and reopen the app. Check that it loads and that library scores open with their annotations.</li>
       <li>In <b>Results</b>, tap <b>Copy report</b> and paste it back to Claude, with what you saw in step 4.</li>
     </ol>
@@ -137,6 +137,16 @@ pre.log { margin: 0; font: 12px/1.45 var(--font-mono); background: var(--bg); bo
       </div>
       <p class="status" id="folderStatus">No folder picked yet.</p>
       <ul class="files" id="folderFiles"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Recent files</h2>
+      <p class="sub">Opens PDFs where they are, without copying them. The app remembers each file so it can reopen it after a restart.</p>
+      <div class="row">
+        <button class="primary" id="btnOpenFiles">Open files</button>
+      </div>
+      <p class="status" id="recentStatus">No files opened yet.</p>
+      <ul class="files" id="recentFiles"></ul>
     </section>
 
     <section class="card">
@@ -369,6 +379,69 @@ async function restoreFolder() {
     $('btnReconnect').hidden = false;
   }
 }
+
+/* ---------- recent files (individual file handles kept in IndexedDB) ---------- */
+let recent = [];
+async function saveRecent() { try { await idb.set('recent', recent); } catch (e) { log('saving recent files failed: ' + e.message); } }
+async function openRecent(h, btn) {
+  const t0 = performance.now();
+  try {
+    let q = await h.queryPermission({ mode: 'read' });
+    if (q !== 'granted') {
+      q = await h.requestPermission({ mode: 'read' });
+      log(`file "${h.name}": requestPermission = ${q} after ${Math.round(performance.now() - t0)} ms`);
+      if (q !== 'granted') return;
+    }
+    const file = await h.getFile();
+    btn.textContent = 'Open';
+    showRecent();
+    await openScore(file, 'file:' + h.name);
+  } catch (e) {
+    log(`file "${h.name}" could not be opened: ${e.name} ${e.message}`);
+    btn.textContent = 'Missing'; btn.disabled = true;
+  }
+}
+async function showRecent() {
+  const ul = $('recentFiles');
+  ul.innerHTML = '';
+  $('recentStatus').textContent = recent.length ? `${recent.length} file${recent.length === 1 ? '' : 's'} remembered.` : 'No files opened yet.';
+  for (const h of recent) {
+    let q = 'unknown';
+    try { q = await h.queryPermission({ mode: 'read' }); } catch (e) { q = 'error ' + e.name; }
+    const li = document.createElement('li');
+    li.innerHTML = '<span></span><span class="acts"><button></button><button>Forget</button></span>';
+    li.firstChild.textContent = h.name + (q === 'granted' ? '' : ` (needs permission: ${q})`);
+    const [bOpen, bDel] = li.querySelectorAll('button');
+    bOpen.textContent = q === 'granted' ? 'Open' : 'Allow and open';
+    bOpen.onclick = () => openRecent(h, bOpen);
+    bDel.onclick = async () => { recent = recent.filter((x) => x !== h); await saveRecent(); showRecent(); };
+    ul.append(li);
+  }
+}
+async function restoreRecent() {
+  try { recent = (await idb.get('recent')) || []; } catch { recent = []; }
+  if (!recent.length) return showRecent();
+  const states = [];
+  for (const h of recent) { try { states.push(await h.queryPermission({ mode: 'read' })); } catch (e) { states.push('error ' + e.name); } }
+  const count = (s) => states.filter((x) => x === s).length;
+  log(`launch: ${recent.length} remembered files, granted ${count('granted')}, prompt ${count('prompt')}, other ${states.length - count('granted') - count('prompt')}`);
+  showRecent();
+}
+$('btnOpenFiles').onclick = async () => {
+  if (!('showOpenFilePicker' in window)) { $('recentStatus').textContent = 'This browser has no file picker that can remember files. Use Import PDF files in Library instead.'; return; }
+  try {
+    const picked = await showOpenFilePicker({ id: 'scores', multiple: true, types: [{ description: 'PDF scores', accept: { 'application/pdf': ['.pdf'] } }] });
+    for (const h of picked) {
+      let dupe = false;
+      for (const r of recent) if (await r.isSameEntry(h)) { dupe = true; break; }
+      if (!dupe) recent.unshift(h);
+    }
+    await saveRecent();
+    log(`picked ${picked.length} file${picked.length === 1 ? '' : 's'}`);
+    await showRecent();
+    if (picked.length === 1) await openScore(await picked[0].getFile(), 'file:' + picked[0].name);
+  } catch (e) { if (e.name !== 'AbortError') log('open files failed: ' + e.name + ' ' + e.message); }
+};
 
 /* ---------- library (origin private file system) ---------- */
 async function libDir() { return (await navigator.storage.getDirectory()).getDirectoryHandle('library', { create: true }); }
@@ -692,6 +765,7 @@ renderLog();
 log(`launch (online: ${navigator.onLine})`);
 runChecks();
 restoreFolder();
+restoreRecent();
 importShared().then(() => showLibrary()).catch((e) => { $('libStatus').textContent = 'Library failed to load: ' + e.message; });
 </script>
 </body>

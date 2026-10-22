@@ -1,5 +1,5 @@
 // Cache-first app shell so the spike opens with no network.
-const CACHE = 'score-spike-v2';
+const CACHE = 'score-spike-v3';
 const SHELL = [
   './',
   'index.html',
