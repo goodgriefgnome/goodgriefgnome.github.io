@@ -1,8 +1,12 @@
 self.addEventListener('activate', function(event) {
   event.waitUntil(
     caches.keys().then(function(cacheNames) {
+      // Only clear this worker's own cache: other apps on this origin
+      // (e.g. /volti/) keep their offline copies in caches of their own.
       return Promise.all(
-        cacheNames.map(function(cacheName) {
+        cacheNames.filter(function(cacheName) {
+          return cacheName === 'all';
+        }).map(function(cacheName) {
           return caches.delete(cacheName);
         }));
     })
