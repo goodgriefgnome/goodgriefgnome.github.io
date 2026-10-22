@@ -141,7 +141,7 @@ pre.log { margin: 0; font: 12px/1.45 var(--font-mono); background: var(--bg); bo
 
     <section class="card">
       <h2>Library</h2>
-      <p class="sub">Copies stored inside the app. These should open with no prompts, even offline.</p>
+      <p class="sub">Copies stored inside the app. These should open with no prompts, even offline. You can also add PDFs from any app (Files, Downloads, Gmail, Drive) with its Share button: pick <b>Scores</b> in the share sheet.</p>
       <div class="row">
         <label class="btn" for="fileInput">Import PDF files</label>
         <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
@@ -155,7 +155,8 @@ pre.log { margin: 0; font: 12px/1.45 var(--font-mono); background: var(--bg); bo
       <h2>Results</h2>
       <p class="sub">Every launch, permission answer and page-turn time is recorded here and kept between launches.</p>
       <div class="row">
-        <button class="primary" id="btnCopy">Copy report</button>
+        <button class="primary" id="btnShare">Share report</button>
+        <button id="btnCopy">Copy report</button>
         <button id="btnClearLog">Clear log</button>
       </div>
       <pre class="log" id="log"></pre>
@@ -277,6 +278,8 @@ function setOffline(ready) {
   chip.classList.toggle('warn', !ready);
 }
 if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) location.reload(); });
   navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => setOffline(true))
     .catch((e) => { setOffline(false); log('offline setup failed: ' + e.message); });
 } else setOffline(false);
@@ -397,6 +400,15 @@ async function showLibrary() {
     ul.append(li);
   }
 }
+async function importShared() {
+  let inbox = [];
+  try { inbox = (await idb.get('inbox')) || []; } catch {}
+  if (!inbox.length) return;
+  for (const f of inbox) await importFile(f);
+  await idb.del('inbox');
+  log(`received ${inbox.length} shared file${inbox.length === 1 ? '' : 's'} from another app`);
+  history.replaceState(null, '', './');
+}
 $('fileInput').onchange = async (e) => { for (const f of e.target.files) await importFile(f); e.target.value = ''; };
 $('btnPersist').onclick = async () => {
   try { const r = await navigator.storage.persist(); log('persist storage request = ' + r); $('btnPersist').textContent = r ? 'Storage kept' : 'Not granted'; } catch (e) { log('persist failed: ' + e.message); }
@@ -408,6 +420,11 @@ $('btnCopy').onclick = async () => {
   try { await navigator.clipboard.writeText(text); $('btnCopy').textContent = 'Copied'; }
   catch { const r = document.createRange(); r.selectNodeContents($('log')); getSelection().removeAllRanges(); getSelection().addRange(r); $('btnCopy').textContent = 'Select and copy the log'; }
   setTimeout(() => { $('btnCopy').textContent = 'Copy report'; }, 2500);
+};
+$('btnShare').onclick = async () => {
+  const text = ['Score Reader Spike report', navigator.userAgent, '', ...CHECKS.map((c) => `${c.label}: ${c.value}`), '', ...LOG].join('\n');
+  if (!navigator.share) { $('btnShare').textContent = 'Sharing not available'; return; }
+  try { await navigator.share({ title: 'Score Reader Spike report', text }); } catch (e) { if (e.name !== 'AbortError') log('share report failed: ' + e.message); }
 };
 $('btnClearLog').onclick = () => { LOG = []; try { localStorage.removeItem('spike-log'); } catch {} renderLog(); };
 
@@ -522,8 +539,8 @@ async function show(reason) {
   const ms = Math.round(performance.now() - t0);
   const pages = nums.length > 1 ? `${nums[0]}–${nums.at(-1)}` : `${nums[0]}`;
   $('vInfo').textContent = `${pages} / ${V.doc.numPages} · ${ms} ms ${wasCached ? 'ready' : 'drawn'}`;
-  if (reason !== 'open' && reason !== 'resize') log(`turn to ${pages} (${V.perScreen}-up): ${ms} ms, ${wasCached ? 'pre-drawn' : 'drawn on demand'}`);
-  else log(`${reason}: showed ${pages} (${V.perScreen}-up) in ${ms} ms, page box ${V.size.w}×${V.size.h}`);
+  if (reason === 'turn') log(`turn to ${pages} (${V.perScreen}-up): ${ms} ms, ${wasCached ? 'pre-drawn' : 'drawn on demand'}`);
+  else log(`${reason}: showed ${pages} (${V.perScreen}-up) in ${ms} ms, stage ${st.clientWidth}×${st.clientHeight}, page box ${V.size.w}×${V.size.h}, page shape ${pageAspect.toFixed(2)}`);
   // pre-draw the next spread, then the previous one
   trimCache();
   for (let i = 0; i < V.perScreen; i++) {
@@ -675,7 +692,7 @@ renderLog();
 log(`launch (online: ${navigator.onLine})`);
 runChecks();
 restoreFolder();
-showLibrary().catch((e) => { $('libStatus').textContent = 'Library failed to load: ' + e.message; });
+importShared().then(() => showLibrary()).catch((e) => { $('libStatus').textContent = 'Library failed to load: ' + e.message; });
 </script>
 </body>
 </html>
