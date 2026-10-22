@@ -1,5 +1,15 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Metronome</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.classless.min.css" crossorigin="anonymous">
+    <style>
+      #toggle { width: 100%; margin-bottom: var(--pico-spacing); }
+      [role=group] button { padding-inline: 0; }
+    </style>
+  </head>
   <body>
     <script src="/metronome/metronome.js"></script>
     <script>
@@ -12,8 +22,9 @@
           metronome.start();
         }
         started = !started;
+        document.getElementById("toggle").textContent = started ? "Stop" : "Start";
       }
-      
+
       function onsliderchange() {
         setbpm(+document.getElementById("bpmslider").value);
       }
@@ -21,41 +32,50 @@
       function onbpmchange() {
         metronome.bpm = getbpm();
       }
-      
+
       function getbpm() {
         return +document.getElementById("bpm").value;
       }
-      
+
       function setbpm(bpm) {
         bpm = Math.round(bpm);
         bpm = Math.min(Math.max(bpm, 10), 200);
         document.getElementById("bpm").value = bpm;
+        document.getElementById("bpmslider").value = bpm;
         onbpmchange();
       }
-      
+
       function add(n) {
         setbpm(getbpm() + n);
       }
-      
+
       function mul(n) {
         setbpm(getbpm() * n);
       }
     </script>
-    <div id="controls">
-      <input id="bpmslider" type="range" min="10" max="200" value="60" oninput="setbpmvalue()">
-      <input id="bpm" type="number" min="10" max="200" value="60" oninput="setbpm()"><br>
-      <button onclick="toggle()">Start/Stop</button><br>
-      <button onclick="add(-10)">-10</button>
-      <button onclick="add(-5)">-5</button>
-      <button onclick="add(5)">5</button>
-      <button onclick="add(10)">10</button><br>
-      <button onclick="mul(1/2)">/2</button>
-      <button onclick="mul(1/1.1)">-10%</button>
-      <button onclick="mul(1/1.05)">-5%</button>
-      <button onclick="mul(1.05)">5%</button>
-      <button onclick="mul(1.1)">10%</button>
-      <button onclick="mul(2)">x2</button>
-    </div>
+    <main>
+      <p><a href="/">&larr; goodgriefgnome</a></p>
+      <h1>Metronome</h1>
+      <div id="controls">
+        <label>BPM <input id="bpm" type="number" min="10" max="200" value="60" onchange="setbpm(getbpm())"></label>
+        <input id="bpmslider" type="range" min="10" max="200" value="60" oninput="onsliderchange()">
+        <button id="toggle" onclick="toggle()">Start</button>
+        <fieldset role="group">
+          <button onclick="add(-10)">-10</button>
+          <button onclick="add(-5)">-5</button>
+          <button onclick="add(5)">+5</button>
+          <button onclick="add(10)">+10</button>
+        </fieldset>
+        <fieldset role="group">
+          <button onclick="mul(1/2)">÷2</button>
+          <button onclick="mul(1/1.1)">-10%</button>
+          <button onclick="mul(1/1.05)">-5%</button>
+          <button onclick="mul(1.05)">+5%</button>
+          <button onclick="mul(1.1)">+10%</button>
+          <button onclick="mul(2)">×2</button>
+        </fieldset>
+      </div>
+    </main>
 
     <script src="/offline.js"></script>
   </body>
