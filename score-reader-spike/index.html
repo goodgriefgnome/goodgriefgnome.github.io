@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Score Reader Spike</title>
+<meta name="theme-color" content="#1d2430">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+/* Layout: stacked test cards (two columns on a tablet), plus a full-screen score viewer overlay. */
+:root {
+  --bg: #eef0f3;
+  --surface: #ffffff;
+  --fg: #1d2430;
+  --muted: #5d6676;
+  --line: #d5d9e0;
+  --accent: #2f5bd3;
+  --accent-fg: #ffffff;
+  --ok: #1f7a46;
+  --warn: #9a6200;
+  --bad: #b3261e;
+  --stage: #2a2f38;
+  --paper: #ffffff;
+  --ink: #1a3fbf;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Roboto Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151a22; --surface: #1e2530; --fg: #e6e9ef; --muted: #9aa3b2; --line: #313a48;
+    --accent: #7d9cff; --accent-fg: #0d1220; --ok: #5cc98a; --warn: #e0a84a; --bad: #ff8a80;
+    --stage: #0e1116; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151a22; --surface: #1e2530; --fg: #e6e9ef; --muted: #9aa3b2; --line: #313a48;
+  --accent: #7d9cff; --accent-fg: #0d1220; --ok: #5cc98a; --warn: #e0a84a; --bad: #ff8a80;
+  --stage: #0e1116; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font-ui);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(16px, env(safe-area-inset-top, 0px)) 32px;
+}
+[hidden] { display: none !important; }
+h1 { font-size: 1.5rem; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.05rem; margin: 0; }
+p { margin: 0; }
+.wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-size: 12px; letter-spacing: .03em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.ok { color: var(--ok); border-color: currentColor; }
+.chip.warn { color: var(--warn); border-color: currentColor; }
+.grid { display: grid; gap: 16px; grid-template-columns: 1fr; }
+@media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.card .sub { color: var(--muted); font-size: 13px; }
+ol.plan { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, .btn {
+  font: inherit; font-size: 14px; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg); cursor: pointer; min-height: 40px;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .5; cursor: default; }
+table.checks { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.checks td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.checks td:last-child { text-align: right; font-family: var(--font-mono); font-size: 13px; padding-left: 12px; }
+.y { color: var(--ok); } .n { color: var(--bad); } .m { color: var(--warn); }
+ul.files { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 320px; overflow: auto; }
+ul.files li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+ul.files li span { min-width: 0; overflow-wrap: anywhere; }
+ul.files li .acts { display: flex; gap: 6px; flex-shrink: 0; }
+ul.files li button { min-height: 34px; padding: 5px 10px; font-size: 13px; }
+.status { font-size: 13px; color: var(--muted); }
+pre.log { margin: 0; font: 12px/1.45 var(--font-mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Viewer */
+#viewer { position: fixed; inset: 0; background: var(--stage); display: flex; flex-direction: column; z-index: 20; color: #e6e9ef; }
+#viewer .bar {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px max(10px, env(safe-area-inset-right, 0px)) 6px max(10px, env(safe-area-inset-left, 0px));
+  padding-top: max(6px, env(safe-area-inset-top, 0px)); background: rgba(0,0,0,.35);
+}
+#viewer .bar button { background: transparent; color: inherit; border-color: rgba(255,255,255,.25); min-height: 38px; padding: 6px 12px; }
+#viewer .bar button[aria-pressed="true"] { background: #e6e9ef; color: #151a22; }
+#viewer .bar .info { font: 12px var(--font-mono); opacity: .8; margin-left: auto; }
+#stage { flex: 1; position: relative; display: flex; justify-content: center; align-items: center; gap: 6px; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pg { position: relative; background: var(--paper); box-shadow: 0 2px 12px rgba(0,0,0,.4); }
+.pg canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+#penstats { position: absolute; left: 8px; bottom: 8px; font: 11px/1.4 var(--font-mono); background: rgba(0,0,0,.6); color: #fff; padding: 4px 8px; border-radius: 6px; pointer-events: none; }
+#viewer .bar .sep { width: 1px; height: 26px; background: rgba(255,255,255,.2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Score Reader Spike</h1>
+    <div class="chips">
+      <span class="chip" id="chipMode">browser tab</span>
+      <span class="chip" id="chipOffline">offline: checking</span>
+      <button id="btnInstall" class="primary" hidden>Install app</button>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>Test plan</h2>
+    <ol class="plan">
+      <li>Run steps 2 to 5 in a Chrome tab first, then install the app (Chrome menu, then <b>Add to home screen</b> or <b>Install app</b>) and repeat them from the home-screen icon.</li>
+      <li>In <b>Score folder</b>, tap <b>Pick folder</b> and choose a folder with PDFs. Open one, try one and two pages per screen, and draw on it with the stylus and with your palm resting on the screen.</li>
+      <li>In <b>Library</b>, import a score or two.</li>
+      <li>Close the app completely (swipe it away in recent apps), then reopen it. In <b>Score folder</b>, tap <b>Reconnect</b> and note whether you got a one-tap prompt, the full file picker, or nothing.</li>
+      <li>Turn on airplane mode and reopen the app. Check that it loads and that library scores open with their annotations.</li>
+      <li>In <b>Results</b>, tap <b>Copy report</b> and paste it back to Claude, with what you saw in step 4.</li>
+    </ol>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Device checks</h2>
+      <table class="checks"><tbody id="checks"></tbody></table>
+    </section>
+
+    <section class="card">
+      <h2>Score folder</h2>
+      <p class="sub">Reads PDFs straight from a folder on the tablet. The folder link is saved so the app can ask for it again on the next launch.</p>
+      <div class="row">
+        <button class="primary" id="btnPick">Pick folder</button>
+        <button id="btnReconnect" hidden>Reconnect</button>
+        <button id="btnWrite" disabled>Test writing</button>
+      </div>
+      <p class="status" id="folderStatus">No folder picked yet.</p>
+      <ul class="files" id="folderFiles"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Library</h2>
+      <p class="sub">Copies stored inside the app. These should open with no prompts, even offline.</p>
+      <div class="row">
+        <label class="btn" for="fileInput">Import PDF files</label>
+        <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
+        <button id="btnPersist">Keep storage</button>
+      </div>
+      <p class="status" id="libStatus">Loading library.</p>
+      <ul class="files" id="libFiles"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Results</h2>
+      <p class="sub">Every launch, permission answer and page-turn time is recorded here and kept between launches.</p>
+      <div class="row">
+        <button class="primary" id="btnCopy">Copy report</button>
+        <button id="btnClearLog">Clear log</button>
+      </div>
+      <pre class="log" id="log"></pre>
+    </section>
+  </div>
+</div>
+
+<div id="viewer" hidden>
+  <div class="bar">
+    <button id="vClose">Close</button>
+    <span class="sep"></span>
+    <button id="vOne" aria-pressed="false">1 page</button>
+    <button id="vTwo" aria-pressed="true">2 pages</button>
+    <span class="sep"></span>
+    <button id="vPen" aria-pressed="false">Pen</button>
+    <button id="vErase" aria-pressed="false">Eraser</button>
+    <button id="vUndo">Undo</button>
+    <button id="vFingerDraw" aria-pressed="false">Finger draws</button>
+    <span class="info" id="vInfo"></span>
+  </div>
+  <div id="stage">
+    <div id="penstats" hidden></div>
+  </div>
+</div>
+
+<script src="vendor/pdf.min.js"></script>
+<script>
+'use strict';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+
+const $ = (id) => document.getElementById(id);
+const standalone = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches;
+const MODE = standalone ? 'installed' : 'tab';
+
+/* ---------- log (kept in localStorage across launches) ---------- */
+let LOG = [];
+try { LOG = JSON.parse(localStorage.getItem('spike-log') || '[]'); } catch { LOG = []; }
+function log(msg) {
+  const t = new Date();
+  const line = `${t.toISOString().slice(5, 19).replace('T', ' ')} [${MODE}] ${msg}`;
+  LOG.push(line);
+  if (LOG.length > 400) LOG = LOG.slice(-400);
+  try { localStorage.setItem('spike-log', JSON.stringify(LOG)); } catch {}
+  renderLog();
+}
+function renderLog() { const el = $('log'); el.textContent = LOG.join('\n') || 'Nothing recorded yet.'; el.scrollTop = el.scrollHeight; }
+
+/* ---------- tiny IndexedDB key-value store ---------- */
+const idb = (() => {
+  let dbp;
+  const open = () => dbp ||= new Promise((res, rej) => {
+    const r = indexedDB.open('spike', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  const tx = async (mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('kv', mode);
+      const req = fn(t.objectStore('kv'));
+      t.oncomplete = () => res(req && req.result);
+      t.onerror = () => rej(t.error);
+    });
+  };
+  return {
+    get: (k) => tx('readonly', (s) => s.get(k)),
+    set: (k, v) => tx('readwrite', (s) => s.put(v, k)),
+    del: (k) => tx('readwrite', (s) => s.delete(k)),
+  };
+})();
+
+/* ---------- device checks ---------- */
+const CHECKS = [];
+function check(label, value, kind) { CHECKS.push({ label, value, kind }); }
+async function runChecks() {
+  const ua = navigator.userAgent;
+  const chrome = (ua.match(/Chrome\/([\d.]+)/) || [])[1] || 'not Chrome';
+  check('Browser', chrome, chrome.startsWith('not') ? 'n' : (parseInt(chrome) >= 132 ? 'y' : 'm'));
+  check('Android', (ua.match(/Android ([\d.]+)/) || [])[1] || 'no', /Android/.test(ua) ? 'y' : 'm');
+  check('Running as', standalone ? 'installed app' : 'browser tab', standalone ? 'y' : 'm');
+  check('Secure context', String(isSecureContext), isSecureContext ? 'y' : 'n');
+  check('Folder picker', String('showDirectoryPicker' in window), 'showDirectoryPicker' in window ? 'y' : 'n');
+  check('File picker', String('showOpenFilePicker' in window), 'showOpenFilePicker' in window ? 'y' : 'n');
+  check('App file storage', String(!!navigator.storage?.getDirectory), navigator.storage?.getDirectory ? 'y' : 'n');
+  let persisted = false;
+  try { persisted = await navigator.storage.persisted(); } catch {}
+  check('Storage kept by Chrome', String(persisted), persisted ? 'y' : 'm');
+  try {
+    const est = await navigator.storage.estimate();
+    check('Storage quota', `${(est.usage / 1e6).toFixed(1)} / ${(est.quota / 1e9).toFixed(1)} GB`, 'y');
+  } catch {}
+  const c = document.createElement('canvas').getContext('2d', { desynchronized: true });
+  const desync = !!c?.getContextAttributes?.().desynchronized;
+  check('Low-latency canvas', String(desync), desync ? 'y' : 'm');
+  check('Extra pen samples', String('getCoalescedEvents' in PointerEvent.prototype), 'getCoalescedEvents' in PointerEvent.prototype ? 'y' : 'm');
+  check('Predicted pen points', String('getPredictedEvents' in PointerEvent.prototype), 'getPredictedEvents' in PointerEvent.prototype ? 'y' : 'm');
+  check('Screen wake lock', String('wakeLock' in navigator), 'wakeLock' in navigator ? 'y' : 'm');
+  check('Screen', `${screen.width}×${screen.height} @${devicePixelRatio}x`, 'y');
+  check('Device memory', navigator.deviceMemory ? navigator.deviceMemory + ' GB+' : 'unknown', 'y');
+  const tb = $('checks');
+  tb.innerHTML = '';
+  for (const { label, value, kind } of CHECKS) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td></td><td class="${kind}"></td>`;
+    tr.children[0].textContent = label;
+    tr.children[1].textContent = value;
+    tb.append(tr);
+  }
+}
+
+/* ---------- offline / install ---------- */
+$('chipMode').textContent = standalone ? 'installed app' : 'browser tab';
+if (standalone) $('chipMode').classList.add('ok');
+function setOffline(ready) {
+  const chip = $('chipOffline');
+  chip.textContent = ready ? 'works offline' : 'offline: not ready';
+  chip.classList.toggle('ok', ready);
+  chip.classList.toggle('warn', !ready);
+}
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => setOffline(true))
+    .catch((e) => { setOffline(false); log('offline setup failed: ' + e.message); });
+} else setOffline(false);
+let installEvt = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('btnInstall').hidden = false; });
+$('btnInstall').onclick = async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  const r = await installEvt.userChoice;
+  log('install prompt: ' + r.outcome);
+  installEvt = null; $('btnInstall').hidden = true;
+};
+addEventListener('appinstalled', () => log('app installed'));
+
+/* ---------- score folder ---------- */
+let dirHandle = null;
+async function listPdfs(dir, prefix = '', depth = 0, out = []) {
+  for await (const [name, h] of dir.entries()) {
+    if (h.kind === 'file' && /\.pdf$/i.test(name)) out.push({ path: prefix + name, handle: h });
+    else if (h.kind === 'directory' && depth < 2 && !name.startsWith('.')) await listPdfs(h, prefix + name + '/', depth + 1, out);
+  }
+  return out;
+}
+async function showFolder() {
+  const ul = $('folderFiles');
+  ul.innerHTML = '';
+  const t0 = performance.now();
+  const files = (await listPdfs(dirHandle)).sort((a, b) => a.path.localeCompare(b.path));
+  const ms = Math.round(performance.now() - t0);
+  $('folderStatus').textContent = `${dirHandle.name}: ${files.length} PDF${files.length === 1 ? '' : 's'} (listed in ${ms} ms)`;
+  log(`folder "${dirHandle.name}" listed: ${files.length} PDFs in ${ms} ms`);
+  for (const f of files) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span></span><span class="acts"><button>Open</button><button>Import</button></span>';
+    li.firstChild.textContent = f.path;
+    const [bOpen, bImp] = li.querySelectorAll('button');
+    bOpen.onclick = async () => openScore(await f.handle.getFile(), 'folder:' + f.path);
+    bImp.onclick = async () => { await importFile(await f.handle.getFile()); bImp.textContent = 'Imported'; bImp.disabled = true; };
+    ul.append(li);
+  }
+  $('btnWrite').disabled = false;
+}
+$('btnPick').onclick = async () => {
+  if (!('showDirectoryPicker' in window)) { $('folderStatus').textContent = 'This browser has no folder picker. Use Import PDF files in Library instead.'; return; }
+  try {
+    dirHandle = await showDirectoryPicker({ id: 'scores', mode: 'read' });
+    await idb.set('dir', dirHandle);
+    log(`picked folder "${dirHandle.name}"`);
+    $('btnReconnect').hidden = true;
+    await showFolder();
+  } catch (e) { if (e.name !== 'AbortError') log('pick folder failed: ' + e.name + ' ' + e.message); }
+};
+$('btnReconnect').onclick = async () => {
+  const t0 = performance.now();
+  try {
+    const r = await dirHandle.requestPermission({ mode: 'read' });
+    log(`reconnect: requestPermission = ${r} after ${Math.round(performance.now() - t0)} ms`);
+    if (r === 'granted') { $('btnReconnect').hidden = true; await showFolder(); }
+  } catch (e) { log('reconnect failed: ' + e.name + ' ' + e.message); $('folderStatus').textContent = 'Reconnect failed: ' + e.message + '. Pick the folder again.'; }
+};
+$('btnWrite').onclick = async () => {
+  try {
+    const r = await dirHandle.requestPermission({ mode: 'readwrite' });
+    log('write permission = ' + r);
+    if (r !== 'granted') return;
+    const fh = await dirHandle.getFileHandle('.score-reader-test.json', { create: true });
+    const w = await fh.createWritable();
+    const payload = JSON.stringify({ written: new Date().toISOString() });
+    await w.write(payload); await w.close();
+    const back = await (await fh.getFile()).text();
+    await dirHandle.removeEntry('.score-reader-test.json');
+    log('write test: ' + (back === payload ? 'wrote, read back and deleted a file OK' : 'read-back mismatch'));
+    $('folderStatus').textContent = 'Writing to the folder works.';
+  } catch (e) { log('write test failed: ' + e.name + ' ' + e.message); $('folderStatus').textContent = 'Writing failed: ' + e.message; }
+};
+async function restoreFolder() {
+  let h = null;
+  try { h = await idb.get('dir'); } catch {}
+  if (!h) return;
+  dirHandle = h;
+  let q = 'unknown';
+  try { q = await h.queryPermission({ mode: 'read' }); } catch (e) { q = 'error ' + e.name; }
+  log(`launch: saved folder "${h.name}", permission = ${q}`);
+  if (q === 'granted') await showFolder().catch((e) => { log('listing saved folder failed: ' + e.name + ' ' + e.message); });
+  else {
+    $('folderStatus').textContent = `Saved folder "${h.name}" needs permission again (${q}). Tap Reconnect.`;
+    $('btnReconnect').hidden = false;
+  }
+}
+
+/* ---------- library (origin private file system) ---------- */
+async function libDir() { return (await navigator.storage.getDirectory()).getDirectoryHandle('library', { create: true }); }
+async function importFile(file) {
+  const t0 = performance.now();
+  const dir = await libDir();
+  const fh = await dir.getFileHandle(file.name, { create: true });
+  const w = await fh.createWritable();
+  await w.write(file); await w.close();
+  log(`imported "${file.name}" (${(file.size / 1e6).toFixed(1)} MB) in ${Math.round(performance.now() - t0)} ms`);
+  await showLibrary();
+}
+async function showLibrary() {
+  const ul = $('libFiles');
+  ul.innerHTML = '';
+  if (!navigator.storage?.getDirectory) { $('libStatus').textContent = 'App file storage is not available in this browser.'; return; }
+  const dir = await libDir();
+  const items = [];
+  for await (const [name, h] of dir.entries()) if (h.kind === 'file') items.push({ name, h });
+  items.sort((a, b) => a.name.localeCompare(b.name));
+  $('libStatus').textContent = items.length ? `${items.length} score${items.length === 1 ? '' : 's'} in the library.` : 'No scores yet. Import from the folder list or with Import PDF files.';
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span></span><span class="acts"><button>Open</button><button>Remove</button></span>';
+    li.firstChild.textContent = it.name;
+    const [bOpen, bDel] = li.querySelectorAll('button');
+    bOpen.onclick = async () => openScore(await it.h.getFile(), 'lib:' + it.name);
+    bDel.onclick = async () => { await dir.removeEntry(it.name); await idb.del('ink:lib:' + it.name); log(`removed "${it.name}"`); showLibrary(); };
+    ul.append(li);
+  }
+}
+$('fileInput').onchange = async (e) => { for (const f of e.target.files) await importFile(f); e.target.value = ''; };
+$('btnPersist').onclick = async () => {
+  try { const r = await navigator.storage.persist(); log('persist storage request = ' + r); $('btnPersist').textContent = r ? 'Storage kept' : 'Not granted'; } catch (e) { log('persist failed: ' + e.message); }
+};
+
+/* ---------- report ---------- */
+$('btnCopy').onclick = async () => {
+  const text = ['Score Reader Spike report', navigator.userAgent, '', ...CHECKS.map((c) => `${c.label}: ${c.value}`), '', ...LOG].join('\n');
+  try { await navigator.clipboard.writeText(text); $('btnCopy').textContent = 'Copied'; }
+  catch { const r = document.createRange(); r.selectNodeContents($('log')); getSelection().removeAllRanges(); getSelection().addRange(r); $('btnCopy').textContent = 'Select and copy the log'; }
+  setTimeout(() => { $('btnCopy').textContent = 'Copy report'; }, 2500);
+};
+$('btnClearLog').onclick = () => { LOG = []; try { localStorage.removeItem('spike-log'); } catch {} renderLog(); };
+
+/* ---------- viewer ---------- */
+const V = {
+  doc: null, key: '', name: '', page: 1, perScreen: 2, tool: 'none', fingerDraws: false,
+  cache: new Map(), queue: Promise.resolve(), ink: {}, undo: [], slots: [], wake: null, size: null,
+};
+try { V.perScreen = Number(localStorage.getItem('spike-per-screen')) || 2; } catch {}
+const DPR = () => Math.min(devicePixelRatio || 1, 2.5);
+
+async function openScore(file, key) {
+  const t0 = performance.now();
+  try {
+    const data = new Uint8Array(await file.arrayBuffer());
+    V.doc = await pdfjsLib.getDocument({ data }).promise;
+  } catch (e) { log(`open "${file.name}" failed: ${e.message}`); return; }
+  V.key = key; V.name = file.name; V.page = 1; V.cache.clear(); V.undo = [];
+  try { V.ink = (await idb.get('ink:' + key)) || {}; } catch { V.ink = {}; }
+  log(`opened "${file.name}": ${V.doc.numPages} pages, ${(file.size / 1e6).toFixed(1)} MB, parsed in ${Math.round(performance.now() - t0)} ms`);
+  $('viewer').hidden = false;
+  try { await document.documentElement.requestFullscreen?.(); } catch {}
+  requestWake();
+  syncBar();
+  layout();
+  await show('open');
+}
+async function requestWake() {
+  try { V.wake = await navigator.wakeLock?.request('screen'); } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (!$('viewer').hidden && document.visibilityState === 'visible') requestWake(); });
+function closeViewer() {
+  $('viewer').hidden = true;
+  V.doc?.destroy(); V.doc = null; V.cache.clear();
+  try { V.wake?.release(); } catch {}
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+/* page box size for the current layout: fit N pages side by side in the stage */
+let pageAspect = 1.414;
+function layout() {
+  const st = $('stage');
+  const W = st.clientWidth - 12, H = st.clientHeight - 12;
+  const n = V.perScreen;
+  let h = H, w = h / pageAspect;
+  if (w * n + 6 * (n - 1) > W) { w = (W - 6 * (n - 1)) / n; h = w * pageAspect; }
+  const size = { w: Math.floor(w), h: Math.floor(h) };
+  if (!V.size || V.size.w !== size.w || V.size.h !== size.h) { V.size = size; V.cache.clear(); }
+}
+
+/* render one page to an offscreen canvas at the current box size (serialised so renders don't fight) */
+function renderPage(num) {
+  const k = `${num}@${V.size.w}x${V.size.h}`;
+  if (V.cache.has(k)) return V.cache.get(k);
+  const doc = V.doc;
+  const p = (V.queue = V.queue.catch(() => {}).then(async () => {
+    if (doc !== V.doc) throw new Error('closed');
+    const t0 = performance.now();
+    const page = await doc.getPage(num);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(V.size.w / base.width, V.size.h / base.height) * DPR();
+    const vp = page.getViewport({ scale });
+    const c = document.createElement('canvas');
+    c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+    await page.render({ canvasContext: c.getContext('2d', { alpha: false }), viewport: vp }).promise;
+    page.cleanup();
+    c.dataset.ms = Math.round(performance.now() - t0);
+    return c;
+  }));
+  V.cache.set(k, p);
+  p.catch(() => V.cache.delete(k));
+  return p;
+}
+function trimCache() {
+  const keep = new Set();
+  for (let i = V.page - V.perScreen; i < V.page + V.perScreen * 2; i++) keep.add(`${i}@${V.size.w}x${V.size.h}`);
+  for (const k of V.cache.keys()) if (!keep.has(k)) V.cache.delete(k);
+}
+
+async function show(reason) {
+  if (!V.doc) return;
+  const t0 = performance.now();
+  const st = $('stage');
+  const nums = [];
+  for (let i = 0; i < V.perScreen && V.page + i <= V.doc.numPages; i++) nums.push(V.page + i);
+  const wasCached = nums.every((n) => V.cache.has(`${n}@${V.size.w}x${V.size.h}`));
+  // first page decides aspect ratio for layout
+  if (reason === 'open') {
+    const p1 = await V.doc.getPage(1);
+    const vp = p1.getViewport({ scale: 1 });
+    pageAspect = vp.height / vp.width; V.size = null; layout();
+  }
+  const canvases = await Promise.all(nums.map(renderPage));
+  st.querySelectorAll('.pg').forEach((el) => el.remove());
+  V.slots = [];
+  canvases.forEach((src, i) => {
+    const num = nums[i];
+    const box = document.createElement('div');
+    box.className = 'pg';
+    const ar = src.height / src.width;
+    const w = Math.min(V.size.w, V.size.h / ar);
+    box.style.width = w + 'px'; box.style.height = (w * ar) + 'px';
+    const pc = src; // the cached render is shown directly, so a pre-drawn turn costs nothing to paint
+    const ink = document.createElement('canvas');
+    ink.width = Math.round(w * DPR()); ink.height = Math.round(w * ar * DPR());
+    box.append(pc, ink);
+    st.insertBefore(box, $('penstats'));
+    const ctx = ink.getContext('2d', { desynchronized: true });
+    V.slots.push({ num, box, ink, ctx });
+    redrawInk(V.slots.at(-1));
+  });
+  const ms = Math.round(performance.now() - t0);
+  const pages = nums.length > 1 ? `${nums[0]}–${nums.at(-1)}` : `${nums[0]}`;
+  $('vInfo').textContent = `${pages} / ${V.doc.numPages} · ${ms} ms ${wasCached ? 'ready' : 'drawn'}`;
+  if (reason !== 'open' && reason !== 'resize') log(`turn to ${pages} (${V.perScreen}-up): ${ms} ms, ${wasCached ? 'pre-drawn' : 'drawn on demand'}`);
+  else log(`${reason}: showed ${pages} (${V.perScreen}-up) in ${ms} ms, page box ${V.size.w}×${V.size.h}`);
+  // pre-draw the next spread, then the previous one
+  trimCache();
+  for (let i = 0; i < V.perScreen; i++) {
+    const n = V.page + V.perScreen + i; if (n <= V.doc.numPages) renderPage(n);
+  }
+  for (let i = 0; i < V.perScreen; i++) {
+    const n = V.page - V.perScreen + i; if (n >= 1) renderPage(n);
+  }
+}
+function turn(dir) {
+  if (!V.doc) return;
+  const next = V.page + dir * V.perScreen;
+  if (next < 1 && V.page === 1) return;
+  if (next > V.doc.numPages) return;
+  V.page = Math.max(1, next);
+  show('turn');
+}
+function syncBar() {
+  $('vOne').setAttribute('aria-pressed', V.perScreen === 1);
+  $('vTwo').setAttribute('aria-pressed', V.perScreen === 2);
+  $('vPen').setAttribute('aria-pressed', V.tool === 'pen');
+  $('vErase').setAttribute('aria-pressed', V.tool === 'erase');
+  $('vFingerDraw').setAttribute('aria-pressed', V.fingerDraws);
+  $('penstats').hidden = V.tool === 'none';
+}
+$('vClose').onclick = closeViewer;
+$('vOne').onclick = () => { V.perScreen = 1; try { localStorage.setItem('spike-per-screen', '1'); } catch {} syncBar(); layout(); show('layout'); };
+$('vTwo').onclick = () => { V.perScreen = 2; try { localStorage.setItem('spike-per-screen', '2'); } catch {} syncBar(); layout(); show('layout'); };
+$('vPen').onclick = () => { V.tool = V.tool === 'pen' ? 'none' : 'pen'; syncBar(); };
+$('vErase').onclick = () => { V.tool = V.tool === 'erase' ? 'none' : 'erase'; syncBar(); };
+$('vFingerDraw').onclick = () => { V.fingerDraws = !V.fingerDraws; syncBar(); };
+$('vUndo').onclick = () => {
+  const u = V.undo.pop(); if (!u) return;
+  if (u.type === 'add') V.ink[u.num].pop(); else V.ink[u.num].splice(u.index, 0, u.stroke);
+  saveInk(); V.slots.filter((s) => s.num === u.num).forEach(redrawInk);
+};
+addEventListener('keydown', (e) => {
+  if ($('viewer').hidden) return;
+  if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); log('key ' + JSON.stringify(e.key)); turn(1); }
+  else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); log('key ' + JSON.stringify(e.key)); turn(-1); }
+  else if (e.key === 'Escape') closeViewer();
+});
+let resizeT;
+addEventListener('resize', () => { if ($('viewer').hidden) return; clearTimeout(resizeT); resizeT = setTimeout(() => { layout(); show('resize'); }, 200); });
+
+/* ---------- ink ---------- */
+function saveInk() { idb.set('ink:' + V.key, V.ink).catch(() => {}); }
+function strokeWidth(slot, pressure) { return (slot.ink.width / 600) * (0.35 + 1.3 * (pressure || 0.5)); }
+function drawSeg(slot, a, b) {
+  const { ctx, ink } = slot;
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--ink') || '#1a3fbf';
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.lineWidth = strokeWidth(slot, (a[2] + b[2]) / 2);
+  ctx.beginPath(); ctx.moveTo(a[0] * ink.width, a[1] * ink.height); ctx.lineTo(b[0] * ink.width, b[1] * ink.height); ctx.stroke();
+}
+function redrawInk(slot) {
+  slot.ctx.clearRect(0, 0, slot.ink.width, slot.ink.height);
+  for (const s of V.ink[slot.num] || []) {
+    if (s.length === 1) drawSeg(slot, s[0], s[0]);
+    for (let i = 1; i < s.length; i++) drawSeg(slot, s[i - 1], s[i]);
+  }
+}
+function slotAt(x, y) {
+  for (const s of V.slots) { const r = s.box.getBoundingClientRect(); if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return { s, r }; }
+  return null;
+}
+const stats = { events: 0, samples: 0, since: performance.now(), last: null, cancels: 0, palmsIgnored: 0 };
+let active = null;      // { id, slot, rect, stroke }
+let lastPen = 0;        // time the pen last touched, for palm rejection
+let swipe = null;       // finger gesture for page turns
+function canDraw(e) { return e.pointerType === 'pen' || e.pointerType === 'mouse' || V.fingerDraws; }
+function norm(e, r) { return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, e.pointerType === 'pen' ? e.pressure : 0.5]; }
+function eraseAt(slot, p) {
+  const list = V.ink[slot.num] || [];
+  const tol = 0.015;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].some((q) => Math.hypot(q[0] - p[0], (q[1] - p[1]) / pageAspect) < tol)) {
+      const [stroke] = list.splice(i, 1);
+      V.undo.push({ type: 'erase', num: slot.num, index: i, stroke });
+      redrawInk(slot); saveInk();
+    }
+  }
+}
+const stage = $('stage');
+stage.addEventListener('pointerdown', (e) => {
+  const drawing = V.tool !== 'none' && canDraw(e);
+  if (e.pointerType === 'pen') lastPen = performance.now();
+  if (drawing && !active) {
+    const hit = slotAt(e.clientX, e.clientY); if (!hit) return;
+    stage.setPointerCapture(e.pointerId);
+    const erasing = V.tool === 'erase' || (e.buttons & 32);
+    active = { id: e.pointerId, slot: hit.s, rect: hit.r, erasing, stroke: erasing ? null : [norm(e, hit.r)] };
+    if (!erasing) drawSeg(hit.s, active.stroke[0], active.stroke[0]); else eraseAt(hit.s, norm(e, hit.r));
+    return;
+  }
+  if (e.pointerType === 'touch') {
+    if (active || performance.now() - lastPen < 600) { stats.palmsIgnored++; return; } // palm while writing
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+  } else if (e.pointerType === 'mouse' && V.tool === 'none') {
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+  }
+});
+stage.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'pen') lastPen = performance.now();
+  if (!active || e.pointerId !== active.id) return;
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  stats.events++; stats.samples += evs.length || 1;
+  for (const ce of (evs.length ? evs : [e])) {
+    const p = norm(ce, active.rect);
+    if (active.erasing) { eraseAt(active.slot, p); continue; }
+    const prev = active.stroke.at(-1);
+    active.stroke.push(p); drawSeg(active.slot, prev, p);
+  }
+  stats.last = e;
+  const now = performance.now();
+  if (now - stats.since > 250) {
+    const secs = (now - stats.since) / 1000;
+    $('penstats').textContent = `${e.pointerType} · pressure ${e.pressure.toFixed(2)} · tilt ${e.tiltX}/${e.tiltY} · ${Math.round(stats.samples / secs)} pts/s (${(stats.samples / Math.max(stats.events, 1)).toFixed(1)} per event) · palms ignored ${stats.palmsIgnored} · cancels ${stats.cancels}`;
+    stats.events = 0; stats.samples = 0; stats.since = now;
+  }
+});
+function endStroke(e, cancelled) {
+  if (e.pointerType === 'pen') lastPen = performance.now();
+  if (swipe && e.pointerId === swipe.id) {
+    const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y, dt = performance.now() - swipe.t;
+    swipe = null;
+    if (cancelled) return;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) turn(dx < 0 ? 1 : -1);
+    else if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 400) {
+      const w = stage.clientWidth;
+      if (e.clientX > w * 0.6) turn(1); else if (e.clientX < w * 0.4) turn(-1);
+    }
+    return;
+  }
+  if (!active || e.pointerId !== active.id) return;
+  const { slot, stroke, erasing } = active;
+  active = null;
+  if (erasing) return;
+  if (cancelled) { stats.cancels++; redrawInk(slot); log('stroke cancelled by the system (palm rejection)'); return; }
+  (V.ink[slot.num] ||= []).push(stroke.map((p) => p.map((v) => Math.round(v * 10000) / 10000)));
+  V.undo.push({ type: 'add', num: slot.num });
+  saveInk();
+}
+stage.addEventListener('pointerup', (e) => endStroke(e, false));
+stage.addEventListener('pointercancel', (e) => endStroke(e, true));
+
+/* ---------- start ---------- */
+renderLog();
+log(`launch (online: ${navigator.onLine})`);
+runChecks();
+restoreFolder();
+showLibrary().catch((e) => { $('libStatus').textContent = 'Library failed to load: ' + e.message; });
+</script>
+</body>
+</html>
