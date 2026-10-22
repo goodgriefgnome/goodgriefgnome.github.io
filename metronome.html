@@ -7,7 +7,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.classless.min.css" crossorigin="anonymous">
     <style>
       #toggle { width: 100%; margin-bottom: var(--pico-spacing); }
-      [role=group] button { padding-inline: 0; }
+      .row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: .5rem; margin-bottom: var(--pico-spacing); }
+      .row button { padding-inline: 0; }
     </style>
   </head>
   <body>
@@ -60,20 +61,20 @@
         <label>BPM <input id="bpm" type="number" min="10" max="200" value="60" onchange="setbpm(getbpm())"></label>
         <input id="bpmslider" type="range" min="10" max="200" value="60" oninput="onsliderchange()">
         <button id="toggle" onclick="toggle()">Start</button>
-        <fieldset role="group">
+        <div class="row">
           <button onclick="add(-10)">-10</button>
           <button onclick="add(-5)">-5</button>
           <button onclick="add(5)">+5</button>
           <button onclick="add(10)">+10</button>
-        </fieldset>
-        <fieldset role="group">
+        </div>
+        <div class="row">
           <button onclick="mul(1/2)">÷2</button>
           <button onclick="mul(1/1.1)">-10%</button>
           <button onclick="mul(1/1.05)">-5%</button>
           <button onclick="mul(1.05)">+5%</button>
           <button onclick="mul(1.1)">+10%</button>
           <button onclick="mul(2)">×2</button>
-        </fieldset>
+        </div>
       </div>
     </main>
 
