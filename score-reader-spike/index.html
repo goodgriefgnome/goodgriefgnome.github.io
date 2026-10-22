@@ -144,6 +144,7 @@ pre.log { margin: 0; font: 12px/1.45 var(--font-mono); background: var(--bg); bo
       <p class="sub">Opens PDFs where they are, without copying them. The app remembers each file so it can reopen it after a restart.</p>
       <div class="row">
         <button class="primary" id="btnOpenFiles">Open files</button>
+        <button id="btnAllowAll" hidden>Allow all</button>
       </div>
       <p class="status" id="recentStatus">No files opened yet.</p>
       <ul class="files" id="recentFiles"></ul>
@@ -348,7 +349,16 @@ $('btnReconnect').onclick = async () => {
   try {
     const r = await dirHandle.requestPermission({ mode: 'read' });
     log(`reconnect: requestPermission = ${r} after ${Math.round(performance.now() - t0)} ms`);
-    if (r === 'granted') { $('btnReconnect').hidden = true; await showFolder(); }
+    if (r === 'granted') {
+      $('btnReconnect').hidden = true;
+      await showFolder();
+      if (recent.length) {
+        const states = [];
+        for (const h of recent) { try { states.push(await h.queryPermission({ mode: 'read' })); } catch (e) { states.push('error'); } }
+        log(`after folder reconnect: ${states.filter((q) => q === 'granted').length} of ${recent.length} remembered files have access`);
+        showRecent();
+      }
+    }
   } catch (e) { log('reconnect failed: ' + e.name + ' ' + e.message); $('folderStatus').textContent = 'Reconnect failed: ' + e.message + '. Pick the folder again.'; }
 };
 $('btnWrite').onclick = async () => {
@@ -405,10 +415,13 @@ async function openRecent(h, btn) {
 async function showRecent() {
   const ul = $('recentFiles');
   ul.innerHTML = '';
-  $('recentStatus').textContent = recent.length ? `${recent.length} file${recent.length === 1 ? '' : 's'} remembered.` : 'No files opened yet.';
-  for (const h of recent) {
-    let q = 'unknown';
-    try { q = await h.queryPermission({ mode: 'read' }); } catch (e) { q = 'error ' + e.name; }
+  const states = [];
+  for (const h of recent) { try { states.push(await h.queryPermission({ mode: 'read' })); } catch (e) { states.push('error ' + e.name); } }
+  const locked = states.filter((q) => q !== 'granted').length;
+  $('recentStatus').textContent = recent.length ? `${recent.length} file${recent.length === 1 ? '' : 's'} remembered${locked ? `, ${locked} need permission` : ''}.` : 'No files opened yet.';
+  $('btnAllowAll').hidden = locked < 2;
+  for (const [i, h] of recent.entries()) {
+    const q = states[i];
     const li = document.createElement('li');
     li.innerHTML = '<span></span><span class="acts"><button></button><button>Forget</button></span>';
     li.firstChild.textContent = h.name + (q === 'granted' ? '' : ` (needs permission: ${q})`);
@@ -419,6 +432,22 @@ async function showRecent() {
     ul.append(li);
   }
 }
+async function allowAll() {
+  const t0 = performance.now();
+  const results = [];
+  for (const h of recent) {
+    let q;
+    try {
+      q = await h.queryPermission({ mode: 'read' });
+      if (q !== 'granted') q = await h.requestPermission({ mode: 'read' });
+    } catch (e) { q = e.name; }
+    results.push(q);
+  }
+  const ok = results.filter((r) => r === 'granted').length;
+  log(`allow all: ${ok} of ${results.length} granted in ${Math.round(performance.now() - t0)} ms (${results.join(', ')})`);
+  showRecent();
+}
+$('btnAllowAll').onclick = allowAll;
 async function restoreRecent() {
   try { recent = (await idb.get('recent')) || []; } catch { recent = []; }
   if (!recent.length) return showRecent();
