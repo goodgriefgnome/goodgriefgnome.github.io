@@ -185,6 +185,7 @@ pre.log { margin: 0; font: 12px/1.45 var(--font-mono); background: var(--bg); bo
     <button id="vErase" aria-pressed="false">Eraser</button>
     <button id="vUndo">Undo</button>
     <button id="vFingerDraw" aria-pressed="false">Finger draws</button>
+    <button id="vLowLat" aria-pressed="false">Low-latency ink</button>
     <span class="info" id="vInfo"></span>
   </div>
   <div id="stage">
@@ -503,10 +504,11 @@ $('btnClearLog').onclick = () => { LOG = []; try { localStorage.removeItem('spik
 
 /* ---------- viewer ---------- */
 const V = {
-  doc: null, key: '', name: '', page: 1, perScreen: 2, tool: 'none', fingerDraws: false,
+  doc: null, key: '', name: '', page: 1, perScreen: 2, tool: 'none', fingerDraws: false, lowLatency: false, showSeq: 0,
   cache: new Map(), queue: Promise.resolve(), ink: {}, undo: [], slots: [], wake: null, size: null,
 };
 try { V.perScreen = Number(localStorage.getItem('spike-per-screen')) || 2; } catch {}
+try { V.lowLatency = localStorage.getItem('spike-low-latency') === '1'; } catch {}
 const DPR = () => Math.min(devicePixelRatio || 1, 2.5);
 
 async function openScore(file, key) {
@@ -579,6 +581,7 @@ function trimCache() {
 
 async function show(reason) {
   if (!V.doc) return;
+  const seq = ++V.showSeq; // a newer show() (turn, resize, layout change) supersedes this one
   const t0 = performance.now();
   const st = $('stage');
   const nums = [];
@@ -590,7 +593,9 @@ async function show(reason) {
     const vp = p1.getViewport({ scale: 1 });
     pageAspect = vp.height / vp.width; V.size = null; layout();
   }
-  const canvases = await Promise.all(nums.map(renderPage));
+  let canvases;
+  try { canvases = await Promise.all(nums.map(renderPage)); } catch (e) { if (seq === V.showSeq) log('render failed: ' + e.message); return; }
+  if (seq !== V.showSeq || !V.doc) return;
   st.querySelectorAll('.pg').forEach((el) => el.remove());
   V.slots = [];
   canvases.forEach((src, i) => {
@@ -605,7 +610,8 @@ async function show(reason) {
     ink.width = Math.round(w * DPR()); ink.height = Math.round(w * ar * DPR());
     box.append(pc, ink);
     st.insertBefore(box, $('penstats'));
-    const ctx = ink.getContext('2d', { desynchronized: true });
+    // Low-latency (desynchronized) canvases bypass the normal compositor and may hide what is underneath on some devices.
+    const ctx = ink.getContext('2d', { desynchronized: V.lowLatency });
     V.slots.push({ num, box, ink, ctx });
     redrawInk(V.slots.at(-1));
   });
@@ -637,6 +643,7 @@ function syncBar() {
   $('vPen').setAttribute('aria-pressed', V.tool === 'pen');
   $('vErase').setAttribute('aria-pressed', V.tool === 'erase');
   $('vFingerDraw').setAttribute('aria-pressed', V.fingerDraws);
+  $('vLowLat').setAttribute('aria-pressed', V.lowLatency);
   $('penstats').hidden = V.tool === 'none';
 }
 $('vClose').onclick = closeViewer;
@@ -645,6 +652,12 @@ $('vTwo').onclick = () => { V.perScreen = 2; try { localStorage.setItem('spike-p
 $('vPen').onclick = () => { V.tool = V.tool === 'pen' ? 'none' : 'pen'; syncBar(); };
 $('vErase').onclick = () => { V.tool = V.tool === 'erase' ? 'none' : 'erase'; syncBar(); };
 $('vFingerDraw').onclick = () => { V.fingerDraws = !V.fingerDraws; syncBar(); };
+$('vLowLat').onclick = () => {
+  V.lowLatency = !V.lowLatency;
+  try { localStorage.setItem('spike-low-latency', V.lowLatency ? '1' : '0'); } catch {}
+  log('low-latency ink ' + (V.lowLatency ? 'on' : 'off'));
+  syncBar(); show('layout');
+};
 $('vUndo').onclick = () => {
   const u = V.undo.pop(); if (!u) return;
   if (u.type === 'add') V.ink[u.num].pop(); else V.ink[u.num].splice(u.index, 0, u.stroke);
